@@ -10,7 +10,7 @@ const DEFAULT_CONFIG = {
   showIfFollowerCountAtLeast: 1000
 }
 
-/** @typedef {{ following?: boolean, followersCount?: number }} UserInfo */
+/** @typedef {{ following?: boolean, followedBy?: boolean, followersCount?: number }} UserInfo */
 
 /** @type {typeof DEFAULT_CONFIG} */
 let config = {...DEFAULT_CONFIG}
@@ -18,11 +18,69 @@ let config = {...DEFAULT_CONFIG}
 /** @type {Record<string, UserInfo>} */
 const userInfoCache = Object.create(null)
 
+const BRIDGE_REQ_TYPE = 'antiimp:getUserInfo'
+const BRIDGE_RES_TYPE = 'antiimp:userInfo'
+
+/** @type {Map<string, (data: any) => void>} */
+const pendingBridgeRequests = new Map()
+
+function injectPageBridge() {
+  const id = 'antiimp-page-bridge'
+  if (document.getElementById(id)) return
+  const s = document.createElement('script')
+  s.id = id
+  s.src = chrome.runtime.getURL('page_bridge.js')
+  ;(document.head || document.documentElement).appendChild(s)
+}
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return
+  const data = event.data
+  if (!data || data.type !== BRIDGE_RES_TYPE) return
+  const requestId = data.requestId
+  if (!requestId) return
+  const cb = pendingBridgeRequests.get(requestId)
+  if (!cb) return
+  pendingBridgeRequests.delete(requestId)
+  cb(data)
+})
+
+/**
+ * Ask page context for userInfo about screenNames.
+ * @param {string[]} screenNames
+ */
+function requestUserInfoFromPage(screenNames) {
+  if (!screenNames.length) return
+  const requestId = String(Date.now()) + ':' + String(Math.random()).slice(2)
+  pendingBridgeRequests.set(requestId, (data) => {
+    const ui = data.userInfo || {}
+    for (const [sn, info] of Object.entries(ui)) {
+      // @ts-ignore
+      userInfoCache[sn] = {
+        ...userInfoCache[sn],
+        ...info,
+      }
+    }
+  })
+
+  window.postMessage({
+    type: BRIDGE_REQ_TYPE,
+    requestId,
+    screenNames,
+  }, '*')
+
+  // fail-safe cleanup
+  setTimeout(() => pendingBridgeRequests.delete(requestId), 2000)
+}
+
 const HIDDEN_ATTR = 'data-antiimp-hidden'
 const HIDDEN_REASON_ATTR = 'data-antiimp-hidden-reason'
 
-function isConversationPage() {
-  // Only apply in permalink conversation pages. e.g. /{user}/status/{id}
+function isConversationOrQuotesPage() {
+  // Apply in permalink conversation pages and quote timelines.
+  // Examples:
+  // - /{user}/status/{id}
+  // - /{user}/status/{id}/quotes
   return location.pathname.includes('/status/')
 }
 
@@ -93,25 +151,22 @@ function parseFollowerCount(raw) {
  * @param {string} screenName
  */
 function tryUpdateUserInfoFromHoverCard(screenName) {
+  // Legacy fallback (if bridge cannot access state).
   const hover = document.querySelector('[data-testid="HoverCard"], [data-testid="hoverCard"], [role="dialog"]')
   if (!hover) return
 
   const text = hover.textContent || ''
   const next = userInfoCache[screenName] ? {...userInfoCache[screenName]} : {}
 
-  // Following state (locale dependent)
   if (/\bFollowing\b/i.test(text) || text.includes('フォロー中')) {
     next.following = true
   }
 
-  // Followers count (try to find near "Followers" / "フォロワー")
-  // Grab link text that contains the label.
   const followerLink = Array.from(hover.querySelectorAll('a')).find((a) => {
     const t = (a.textContent || '').trim()
     return /Followers/i.test(t) || t.includes('フォロワー')
   })
   if (followerLink) {
-    // Often like "1,234 Followers" or "1.2万 フォロワー"
     const t = (followerLink.textContent || '').trim()
     const numPart = t.replace(/Followers/i, '').replace('フォロワー', '').trim()
     const parsed = parseFollowerCount(numPart)
@@ -168,13 +223,21 @@ function showAllHidden() {
 }
 
 function scanAndApply() {
-  if (!config.enabled || !config.hideBlueBadgeReplies || !isConversationPage()) {
+  if (!config.enabled || !config.hideBlueBadgeReplies || !isConversationOrQuotesPage()) {
     showAllHidden()
     return
   }
 
   const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
   if (tweets.length === 0) return
+
+  // Ask page cache for user info for visible tweets (best effort)
+  const screenNamesToFetch = []
+  for (let i = 1; i < tweets.length; i++) {
+    const sn = getScreenNameFromTweet(/** @type {HTMLElement} */(tweets[i]))
+    if (sn && !userInfoCache[sn]) screenNamesToFetch.push(sn)
+  }
+  if (screenNamesToFetch.length) requestUserInfoFromPage(screenNamesToFetch.slice(0, 50))
 
   // Heuristic: first tweet is the main tweet; treat the rest as replies.
   for (let i = 0; i < tweets.length; i++) {
@@ -211,6 +274,8 @@ function scheduleScan() {
 }
 
 async function init() {
+  injectPageBridge()
+
   config = await chrome.storage.local.get(DEFAULT_CONFIG)
 
   chrome.storage.onChanged.addListener((changes, area) => {

@@ -9,41 +9,76 @@
   <body>
     <header class="header">
       <div class="title">anti-imp</div>
-      <div class="sub">リプライ中のブルーバッジを非表示</div>
+      <div class="sub">リプライ中の青バッジ(Verified)を非表示</div>
     </header>
 
     <main class="main">
-      <label class="row">
-        <input id="toggleHide" type="checkbox" />
-        <span>リプライ中のブルーバッジアイコンを非表示にする</span>
-      </label>
+      <section class="card">
+        <div class="cardHeader">
+          <div>
+            <div class="cardTitle">メイン</div>
+            <div class="cardDesc">会話ページ（/status/）のリプライに適用</div>
+          </div>
+        </div>
 
-      <details class="details">
-        <summary>例外（表示する条件）</summary>
+        <div class="setting">
+          <div class="settingText">
+            <div class="settingTitle">青バッジ付きリプライを非表示</div>
+            <div class="settingDesc">Verified（青バッジ）を付けたリプライ投稿を隠します</div>
+          </div>
+          <label class="switch">
+            <input id="toggleHide" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </section>
 
-        <label class="row indent">
-          <input id="toggleFollowing" type="checkbox" />
-          <span>フォロー中の人は表示</span>
-        </label>
+      <section class="card">
+        <div class="cardHeader">
+          <div>
+            <div class="cardTitle">例外（表示する）</div>
+            <div class="cardDesc">フォロー情報やフォロワー数はキャッシュから取得します</div>
+          </div>
+        </div>
 
-        <label class="row indent">
-          <input id="toggleFollowerCount" type="checkbox" />
-          <span>フォロワー数が閾値以上は表示</span>
-        </label>
+        <div class="setting">
+          <div class="settingText">
+            <div class="settingTitle">フォロー中の人は表示</div>
+            <div class="settingDesc">following=true のユーザーは隠さない</div>
+          </div>
+          <label class="switch">
+            <input id="toggleFollowing" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+        </div>
 
-        <label class="row indent2">
-          <span class="muted">閾値</span>
-          <input id="followerCount" type="number" min="0" step="1" />
-          <span class="muted">人以上</span>
-        </label>
+        <div class="setting">
+          <div class="settingText">
+            <div class="settingTitle">フォロワー数が閾値以上は表示</div>
+            <div class="settingDesc">followers_count が設定値以上なら隠さない</div>
+          </div>
+          <label class="switch">
+            <input id="toggleFollowerCount" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting compact" id="followerCountRow">
+          <div class="settingText">
+            <div class="settingTitle">閾値</div>
+          </div>
+          <div class="inlineInput">
+            <input id="followerCount" type="number" min="0" step="1" />
+            <span class="suffix">人以上</span>
+          </div>
+        </div>
 
         <div class="note">
-          ※ 例外条件は、ホバーカード等から情報が取れた場合のみ反映されます。
+          反映されない場合は、ページ再読み込み or 数秒待つと state にユーザーが載ります。
         </div>
-      </details>
+      </section>
     </main>
 
     <script src="popup.js"></script>
   </body>
 </html>
-

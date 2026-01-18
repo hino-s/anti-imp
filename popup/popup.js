@@ -22,6 +22,10 @@ async function load() {
 
 function updateDisabledState() {
   $('followerCount').disabled = !$('toggleFollowerCount').checked
+  const row = $('followerCountRow')
+  if (row) {
+    row.classList.toggle('disabledRow', !$('toggleFollowerCount').checked)
+  }
 }
 
 async function save() {
@@ -45,4 +49,3 @@ document.addEventListener('DOMContentLoaded', async () => {
   })
   $('followerCount').addEventListener('change', save)
 })
-
