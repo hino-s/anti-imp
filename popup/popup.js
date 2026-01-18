@@ -28,6 +28,14 @@ function updateDisabledState() {
   }
 }
 
+let saveTimer = 0
+function scheduleSave() {
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => {
+    save()
+  }, 250)
+}
+
 async function save() {
   const next = {
     hideBlueBadgeReplies: $('toggleHide').checked,
@@ -47,5 +55,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateDisabledState()
     save()
   })
+  // Save threshold asynchronously while typing (debounced)
+  $('followerCount').addEventListener('input', scheduleSave)
   $('followerCount').addEventListener('change', save)
 })

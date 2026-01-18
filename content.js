@@ -24,6 +24,11 @@ const BRIDGE_RES_TYPE = 'antiimp:userInfo'
 /** @type {Map<string, (data: any) => void>} */
 const pendingBridgeRequests = new Map()
 
+// Avoid spamming bridge requests for the same screenName.
+/** @type {Map<string, number>} */
+const userInfoFetchCooldownUntil = new Map()
+const USERINFO_FETCH_COOLDOWN_MS = 15_000
+
 function injectPageBridge() {
   const id = 'antiimp-page-bridge'
   if (document.getElementById(id)) return
@@ -54,6 +59,7 @@ function requestUserInfoFromPage(screenNames) {
   const requestId = String(Date.now()) + ':' + String(Math.random()).slice(2)
   pendingBridgeRequests.set(requestId, (data) => {
     const ui = data.userInfo || {}
+    const count = Object.keys(ui).length
     for (const [sn, info] of Object.entries(ui)) {
       // @ts-ignore
       userInfoCache[sn] = {
@@ -64,6 +70,11 @@ function requestUserInfoFromPage(screenNames) {
 
     // Re-apply after userInfo arrives (fixes follower-count exception timing)
     scheduleScan()
+
+    // Quotes page tends to fill users/entities lazily; retry a few times if we got nothing.
+    if (count === 0 && screenNames.length) {
+      scheduleRetry()
+    }
   })
 
   window.postMessage({
@@ -94,14 +105,35 @@ function getTweetCellContainer(el) {
 
 /** @param {HTMLElement} tweet */
 function isVerifiedTweet(tweet) {
+  // IMPORTANT:
+  // On quote timelines, an article often contains an embedded quoted tweet.
+  // That embedded tweet can include a verified icon even if the quoting user is not verified.
+  // Therefore we only consider the verified icon inside the *author header*.
+
+  const header = getAuthorHeader(tweet) || tweet
+
   // X often uses data-testid icon-verified for the check badge.
-  if (tweet.querySelector('[data-testid="icon-verified"]')) return true
+  if (header.querySelector('[data-testid="icon-verified"]')) return true
 
   // Fallback for aria-label based icons (depends on locale).
-  const svg = tweet.querySelector('svg[aria-label]')
+  const svg = header.querySelector('svg[aria-label]')
   if (!svg) return false
   const label = (svg.getAttribute('aria-label') || '').toLowerCase()
   return label.includes('verified') || label.includes('認証') || label.includes('認証済')
+}
+
+/**
+ * On Quotes pages, an outer tweet can contain an embedded quoted tweet (sometimes as a nested <article>).
+ * We need the *outer* tweet author's header.
+ * @param {HTMLElement} tweet
+ */
+function getAuthorHeader(tweet) {
+  const candidates = Array.from(tweet.querySelectorAll('[data-testid="User-Name"]'))
+  for (const el of candidates) {
+    const closestArticle = el.closest('article[data-testid="tweet"]')
+    if (closestArticle === tweet) return /** @type {HTMLElement} */ (el)
+  }
+  return null
 }
 
 /**
@@ -111,16 +143,23 @@ function isVerifiedTweet(tweet) {
  */
 function getScreenNameFromTweet(tweet) {
   // Usually the user name block exists in header.
-  const userNameBlock = tweet.querySelector('[data-testid="User-Name"]')
-  const a = (userNameBlock || tweet).querySelector('a[href^="/"]')
+  const userNameBlock = getAuthorHeader(tweet)
+  const scope = userNameBlock || tweet
+
+  // 1) Prefer @handle text if present (more robust than href patterns).
+  const text = (scope.textContent || '').trim()
+  const at = text.match(/@([A-Za-z0-9_]{1,15})/)
+  if (at) return at[1].toLowerCase()
+
+  // 2) Fallback to profile link like /{screenName}
+  const a = scope.querySelector('a[href^="/"]')
   if (!a) return null
 
   const href = a.getAttribute('href') || ''
-  // href is like /{screenName}
-  const m = href.match(/^\/([^\/\?]+)(?:\?|$)/)
+  const m = href.match(/^\/([A-Za-z0-9_]{1,15})(?:\b|\/|\?|$)/)
   if (!m) return null
 
-  const screenName = m[1]
+  const screenName = m[1].toLowerCase()
   // Guard against special routes.
   if (!screenName || screenName === 'home' || screenName === 'i' || screenName === 'settings') return null
   return screenName
@@ -150,36 +189,6 @@ function parseFollowerCount(raw) {
 }
 
 /**
- * Try to read user info from the hover card if present.
- * @param {string} screenName
- */
-function tryUpdateUserInfoFromHoverCard(screenName) {
-  // Legacy fallback (if bridge cannot access state).
-  const hover = document.querySelector('[data-testid="HoverCard"], [data-testid="hoverCard"], [role="dialog"]')
-  if (!hover) return
-
-  const text = hover.textContent || ''
-  const next = userInfoCache[screenName] ? {...userInfoCache[screenName]} : {}
-
-  if (/\bFollowing\b/i.test(text) || text.includes('フォロー中')) {
-    next.following = true
-  }
-
-  const followerLink = Array.from(hover.querySelectorAll('a')).find((a) => {
-    const t = (a.textContent || '').trim()
-    return /Followers/i.test(t) || t.includes('フォロワー')
-  })
-  if (followerLink) {
-    const t = (followerLink.textContent || '').trim()
-    const numPart = t.replace(/Followers/i, '').replace('フォロワー', '').trim()
-    const parsed = parseFollowerCount(numPart)
-    if (parsed != null) next.followersCount = parsed
-  }
-
-  userInfoCache[screenName] = next
-}
-
-/**
  * @param {string|null} screenName
  * @returns {boolean} true if allowed (should remain visible)
  */
@@ -194,6 +203,18 @@ function isAllowedByExceptions(screenName) {
     if ((info.followersCount || 0) >= threshold) return true
   }
   return false
+}
+
+/**
+ * If follower-count exception is enabled but followersCount is not available yet,
+ * we keep the tweet visible (do not hide prematurely).
+ * @param {string|null} screenName
+ */
+function shouldDeferHideBecauseFollowersCountUnknown(screenName) {
+  if (!config.showIfFollowerCountAtLeastEnabled) return false
+  if (!screenName) return true
+  const info = userInfoCache[screenName]
+  return !info || info.followersCount == null
 }
 
 /** @param {HTMLElement} tweet */
@@ -227,15 +248,37 @@ function showAllHidden() {
 
 function scanAndApply() {
   if (!config.enabled || !config.hideBlueBadgeReplies || !isConversationOrQuotesPage()) {
+    retryCount = 0
     showAllHidden()
     return
   }
 
-  const tweets = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
+  if (!config.showIfFollowerCountAtLeastEnabled) {
+    retryCount = 0
+  }
+
+  // IMPORTANT:
+  // On Quotes pages, each timeline cell can contain:
+  // - the outer quote tweet (author we care about)
+  // - an embedded quoted tweet (often also rendered as an <article data-testid="tweet">)
+  // Order is not guaranteed. We must pick the *outer* article.
+  const cells = Array.from(document.querySelectorAll('div[data-testid="cellInnerDiv"]'))
+  const tweets = cells
+    .map((cell) => {
+      const articles = Array.from(cell.querySelectorAll('article[data-testid="tweet"]'))
+      if (!articles.length) return null
+
+      // Choose an article that is NOT nested within another tweet article.
+      // (Embedded quoted tweets are typically nested.)
+      const outer = articles.find((a) => a.parentElement && !a.parentElement.closest('article[data-testid="tweet"]'))
+      return outer || articles[0]
+    })
+    .filter(Boolean)
   if (tweets.length === 0) return
 
   // Ask page cache for user info for visible tweets (best effort)
-  const screenNamesToFetch = []
+  /** @type {Set<string>} */
+  const screenNamesToFetch = new Set()
   for (let i = 1; i < tweets.length; i++) {
     const sn = getScreenNameFromTweet(/** @type {HTMLElement} */(tweets[i]))
     if (!sn) continue
@@ -243,12 +286,19 @@ function scanAndApply() {
     const cached = userInfoCache[sn]
     // Fetch if we have no cache OR followersCount is still missing (common early)
     if (!cached || cached.followersCount == null) {
-      screenNamesToFetch.push(sn)
+      const now = Date.now()
+      const until = userInfoFetchCooldownUntil.get(sn) || 0
+      if (now >= until) {
+        userInfoFetchCooldownUntil.set(sn, now + USERINFO_FETCH_COOLDOWN_MS)
+        screenNamesToFetch.add(sn)
+      }
     }
   }
-  if (screenNamesToFetch.length) requestUserInfoFromPage(screenNamesToFetch.slice(0, 50))
+  if (screenNamesToFetch.size) requestUserInfoFromPage(Array.from(screenNamesToFetch).slice(0, 200))
 
-  // Heuristic: first tweet is the main tweet; treat the rest as replies.
+  // logs removed
+
+  // Heuristic: first cell is the main tweet; treat the rest as replies/quotes.
   for (let i = 0; i < tweets.length; i++) {
     const tweet = /** @type {HTMLElement} */(tweets[i])
     if (i === 0) {
@@ -267,9 +317,30 @@ function scanAndApply() {
     if (allowed) {
       showTweet(tweet)
     } else {
-      hideTweet(tweet, 'verified-reply')
+      // If follower count exception is enabled but we don't have follower count yet,
+      // keep it visible for now and decide after state arrives.
+      if (shouldDeferHideBecauseFollowersCountUnknown(screenName)) {
+        showTweet(tweet)
+      } else {
+        hideTweet(tweet, 'verified-reply')
+      }
     }
   }
+
+  // logs removed
+}
+
+// Quotes pages often populate users.entities lazily. Retry a few times so follower counts can arrive.
+let retryCount = 0
+function scheduleRetry() {
+  if (!config.showIfFollowerCountAtLeastEnabled) return
+  if (!isConversationOrQuotesPage()) return
+  if (retryCount >= 8) return
+  retryCount++
+  const delay = Math.min(6000, 600 * Math.pow(1.4, retryCount))
+  setTimeout(() => {
+    scanAndApply()
+  }, delay)
 }
 
 let scheduled = false
@@ -302,26 +373,7 @@ async function init() {
     subtree: true
   })
 
-  // Capture hovercard info opportunistically
-  let lastHoverScreenName = null
-  let hoverTimer = 0
-  document.addEventListener('mouseover', (ev) => {
-    const a = /** @type {HTMLElement|null} */(ev.target instanceof Element ? ev.target.closest('a[href^="/"]') : null)
-    if (!a) return
-    const href = a.getAttribute('href') || ''
-    const m = href.match(/^\/([^\/\?]+)(?:\?|$)/)
-    if (!m) return
-    const screenName = m[1]
-    if (!screenName) return
-    lastHoverScreenName = screenName
-
-    window.clearTimeout(hoverTimer)
-    hoverTimer = window.setTimeout(() => {
-      if (!lastHoverScreenName) return
-      tryUpdateUserInfoFromHoverCard(lastHoverScreenName)
-      scheduleScan()
-    }, 450)
-  }, {capture: true})
+  // NOTE: Hovercard-based parsing is disabled to keep followerCount source consistent.
 
   // When navigating within SPA, re-evaluate.
   const origPushState = history.pushState
