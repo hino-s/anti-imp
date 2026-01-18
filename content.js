@@ -61,6 +61,9 @@ function requestUserInfoFromPage(screenNames) {
         ...info,
       }
     }
+
+    // Re-apply after userInfo arrives (fixes follower-count exception timing)
+    scheduleScan()
   })
 
   window.postMessage({
@@ -235,7 +238,13 @@ function scanAndApply() {
   const screenNamesToFetch = []
   for (let i = 1; i < tweets.length; i++) {
     const sn = getScreenNameFromTweet(/** @type {HTMLElement} */(tweets[i]))
-    if (sn && !userInfoCache[sn]) screenNamesToFetch.push(sn)
+    if (!sn) continue
+
+    const cached = userInfoCache[sn]
+    // Fetch if we have no cache OR followersCount is still missing (common early)
+    if (!cached || cached.followersCount == null) {
+      screenNamesToFetch.push(sn)
+    }
   }
   if (screenNamesToFetch.length) requestUserInfoFromPage(screenNamesToFetch.slice(0, 50))
 
