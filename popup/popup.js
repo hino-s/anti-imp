@@ -26,6 +26,19 @@ function updateDisabledState() {
   if (row) {
     row.classList.toggle('disabledRow', !$('toggleFollowerCount').checked)
   }
+
+  const exceptionsCard = $('exceptionsCard')
+  const mainOn = $('toggleHide').checked
+  if (exceptionsCard) {
+    exceptionsCard.classList.toggle('disabled', !mainOn)
+  }
+  // Disable all inputs in the exceptions card when main feature is OFF
+  if (exceptionsCard) {
+    const inputs = exceptionsCard.querySelectorAll('input')
+    for (const input of inputs) {
+      input.disabled = !mainOn || (input.id === 'followerCount' && !$('toggleFollowerCount').checked)
+    }
+  }
 }
 
 let saveTimer = 0
@@ -49,7 +62,10 @@ async function save() {
 document.addEventListener('DOMContentLoaded', async () => {
   await load()
 
-  $('toggleHide').addEventListener('change', save)
+  $('toggleHide').addEventListener('change', () => {
+    updateDisabledState()
+    save()
+  })
   $('toggleFollowing').addEventListener('change', save)
   $('toggleFollowerCount').addEventListener('change', () => {
     updateDisabledState()

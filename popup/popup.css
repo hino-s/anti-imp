@@ -41,6 +41,15 @@ body {
   overflow: hidden;
 }
 
+.card.disabled {
+  opacity: 0.55;
+  background: #f7f9f9;
+}
+
+.card.disabled * {
+  cursor: not-allowed !important;
+}
+
 .cardHeader {
   padding: 10px 12px;
   border-bottom: 1px solid #f0f0f0;
@@ -174,4 +183,20 @@ input[type='number']:disabled {
 
 .disabledRow {
   opacity: 0.55;
+}
+
+#donate-link {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e6e6e6;
+  color: #1d9bf0;
+  text-decoration: none;
+  font-size: 13px;
+  text-align: center;
+}
+
+#donate-link:hover {
+  background: #f7f9f9;
 }
