@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>anti-imp</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="title">anti-imp</div>
+      <div class="sub">リプライ中のブルーバッジを非表示</div>
+    </header>
+
+    <main class="main">
+      <label class="row">
+        <input id="toggleHide" type="checkbox" />
+        <span>リプライ中のブルーバッジアイコンを非表示にする</span>
+      </label>
+
+      <details class="details">
+        <summary>例外（表示する条件）</summary>
+
+        <label class="row indent">
+          <input id="toggleFollowing" type="checkbox" />
+          <span>フォロー中の人は表示</span>
+        </label>
+
+        <label class="row indent">
+          <input id="toggleFollowerCount" type="checkbox" />
+          <span>フォロワー数が閾値以上は表示</span>
+        </label>
+
+        <label class="row indent2">
+          <span class="muted">閾値</span>
+          <input id="followerCount" type="number" min="0" step="1" />
+          <span class="muted">人以上</span>
+        </label>
+
+        <div class="note">
+          ※ 例外条件は、ホバーカード等から情報が取れた場合のみ反映されます。
+        </div>
+      </details>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
+

@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "anti-imp",
+  "description": "Hide verified (blue badge) replies on X (Twitter).",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "anti-imp",
+    "default_popup": "popup/popup.html"
+  },
+  "icons": {
+    "16": "icon/icon16.png",
+    "32": "icon/icon32.png",
+    "64": "icon/icon64.png",
+    "128": "icon/icon128.png"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["https://x.com/*", "https://twitter.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+

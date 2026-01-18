@@ -1,0 +1,66 @@
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  width: 320px;
+  color: #111;
+}
+
+.header {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e6e6e6;
+}
+
+.title {
+  font-weight: 700;
+}
+
+.sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #555;
+}
+
+.main {
+  padding: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.indent {
+  margin-left: 8px;
+}
+
+.indent2 {
+  margin-left: 24px;
+}
+
+.details {
+  margin-top: 10px;
+}
+
+.details summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+input[type='number'] {
+  width: 90px;
+}
+
+.muted {
+  color: #666;
+  font-size: 12px;
+}
+
+.note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #666;
+  line-height: 1.3;
+}
+
