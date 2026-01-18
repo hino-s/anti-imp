@@ -9,22 +9,22 @@
   <body>
     <header class="header">
       <div class="title">anti-imp</div>
-      <div class="sub">リプライ中の青バッジ(Verified)を非表示</div>
+      <div class="sub" data-i18n="popupSubtitle">リプライ中の青バッジ(Verified)を非表示</div>
     </header>
 
     <main class="main">
       <section class="card">
         <div class="cardHeader">
           <div>
-            <div class="cardTitle">メイン</div>
-            <div class="cardDesc">会話ページ（/status/）のリプライに適用</div>
+            <div class="cardTitle" data-i18n="sectionMainTitle">メイン</div>
+            <div class="cardDesc" data-i18n="sectionMainDesc">会話ページ（/status/）のリプライに適用</div>
           </div>
         </div>
 
         <div class="setting">
           <div class="settingText">
-            <div class="settingTitle">青バッジ付きリプライを非表示</div>
-            <div class="settingDesc">Verified（青バッジ）を付けたリプライ投稿を隠します</div>
+            <div class="settingTitle" data-i18n="settingHideTitle">青バッジ付きリプライを非表示</div>
+            <div class="settingDesc" data-i18n="settingHideDesc">Verified（青バッジ）を付けたリプライ投稿を隠します</div>
           </div>
           <label class="switch">
             <input id="toggleHide" type="checkbox" />
@@ -36,13 +36,13 @@
       <section class="card" id="exceptionsCard">
         <div class="cardHeader">
           <div>
-            <div class="cardTitle">例外（表示する）</div>
+            <div class="cardTitle" data-i18n="sectionExceptionsTitle">例外（表示する）</div>
           </div>
         </div>
 
         <div class="setting">
           <div class="settingText">
-            <div class="settingTitle">フォロー中の人は表示</div>
+            <div class="settingTitle" data-i18n="settingFollowingTitle">フォロー中の人は表示</div>
           </div>
           <label class="switch">
             <input id="toggleFollowing" type="checkbox" />
@@ -52,7 +52,7 @@
 
         <div class="setting">
           <div class="settingText">
-            <div class="settingTitle">フォロワー数が閾値以上は表示</div>
+            <div class="settingTitle" data-i18n="settingFollowerCountTitle">フォロワー数が閾値以上は表示</div>
           </div>
           <label class="switch">
             <input id="toggleFollowerCount" type="checkbox" />
@@ -62,17 +62,17 @@
 
         <div class="setting compact" id="followerCountRow">
           <div class="settingText">
-            <div class="settingTitle">閾値</div>
+            <div class="settingTitle" data-i18n="settingThresholdTitle">閾値</div>
           </div>
           <div class="inlineInput">
             <input id="followerCount" type="number" min="0" step="1" />
-            <span class="suffix">人以上</span>
+            <span class="suffix" data-i18n="settingThresholdSuffix">人以上</span>
           </div>
         </div>
       </section>
 
       <a href="https://www.paypal.com/paypalme/hinosi" target="_blank" id="donate-link">
-        開発を支援する（PayPal）
+        <span data-i18n="donateLink">開発を支援する（PayPal）</span>
       </a>
     </main>
 

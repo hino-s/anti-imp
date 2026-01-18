@@ -60,6 +60,19 @@ async function save() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Apply i18n strings
+  try {
+    const nodes = document.querySelectorAll('[data-i18n]')
+    for (const el of nodes) {
+      const key = el.getAttribute('data-i18n')
+      if (!key) continue
+      const msg = chrome.i18n.getMessage(key)
+      if (msg) el.textContent = msg
+    }
+  } catch {
+    // ignore
+  }
+
   await load()
 
   $('toggleHide').addEventListener('change', () => {

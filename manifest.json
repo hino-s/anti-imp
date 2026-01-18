@@ -3,6 +3,7 @@
   "name": "anti-imp",
   "description": "Hide verified (blue badge) replies on X (Twitter).",
   "version": "0.1.0",
+  "default_locale": "en",
   "action": {
     "default_title": "anti-imp",
     "default_popup": "popup/popup.html"

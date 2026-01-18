@@ -1,0 +1,21 @@
+{
+  "extName": {"message": "anti-imp"},
+  "extDescription": {"message": "Hide verified (blue badge) replies on X (Twitter)."},
+
+  "popupSubtitle": {"message": "Hide verified (blue badge) replies"},
+
+  "sectionMainTitle": {"message": "Main"},
+  "sectionMainDesc": {"message": "Applies on conversation pages (/status/) and quotes (/quotes)"},
+
+  "settingHideTitle": {"message": "Hide verified replies"},
+  "settingHideDesc": {"message": "Hide replies/quotes posted by verified (blue badge) accounts"},
+
+  "sectionExceptionsTitle": {"message": "Exceptions (keep visible)"},
+  "settingFollowingTitle": {"message": "Keep visible if following"},
+  "settingFollowerCountTitle": {"message": "Keep visible if followers ≥ threshold"},
+  "settingThresholdTitle": {"message": "Threshold"},
+  "settingThresholdSuffix": {"message": "+"},
+
+  "donateLink": {"message": "Support development (PayPal)"}
+}
+
