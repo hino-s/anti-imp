@@ -2,10 +2,7 @@
   "extName": {"message": "anti-imp"},
   "extDescription": {"message": "X(Twitter)の青バッジ(Verified)付きリプライ/引用を非表示にします。"},
 
-  "popupSubtitle": {"message": "リプライ中の青バッジ(Verified)を非表示"},
-
-  "sectionMainTitle": {"message": "メイン"},
-  "sectionMainDesc": {"message": "会話ページ（/status/）と引用（/quotes）で適用"},
+  "popupSubtitle": {"message": "青バッジ(Verified)付きリプライ/引用を非表示"},
 
   "settingHideTitle": {"message": "青バッジ付きリプライを非表示"},
   "settingHideDesc": {"message": "Verified（青バッジ）を付けたリプライ/引用投稿を隠します"},

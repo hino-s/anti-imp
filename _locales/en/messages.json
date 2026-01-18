@@ -4,9 +4,6 @@
 
   "popupSubtitle": {"message": "Hide verified (blue badge) replies"},
 
-  "sectionMainTitle": {"message": "Main"},
-  "sectionMainDesc": {"message": "Applies on conversation pages (/status/) and quotes (/quotes)"},
-
   "settingHideTitle": {"message": "Hide verified replies"},
   "settingHideDesc": {"message": "Hide replies/quotes posted by verified (blue badge) accounts"},
 
