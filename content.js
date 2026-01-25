@@ -1,5 +1,10 @@
 // anti-imp content script
-// Hide verified (blue badge) replies on X/Twitter. MV3 / no build tools.
+// X(Twitter)上で、青バッジ(Verified)付きのリプライ/引用投稿を非表示にします。
+// MV3 / ビルド不要
+
+// ------------------------------
+// 設定
+// ------------------------------
 
 const DEFAULT_CONFIG = {
   enabled: true,
@@ -24,11 +29,34 @@ const BRIDGE_RES_TYPE = 'antiimp:userInfo'
 /** @type {Map<string, (data: any) => void>} */
 const pendingBridgeRequests = new Map()
 
-// Avoid spamming bridge requests for the same screenName.
+// ------------------------------
+// レート制限 / キャッシュ
+// ------------------------------
+
+// 同じscreenNameに対するbridge問い合わせを連発しないためのクールダウン。
 /** @type {Map<string, number>} */
 const userInfoFetchCooldownUntil = new Map()
 const USERINFO_FETCH_COOLDOWN_MS = 15_000
+const USERINFO_FETCH_COOLDOWN_MAX = 800
 
+/**
+ * クールダウン用Mapが無限に増えないように、期限切れを掃除します。
+ */
+function pruneCooldownMap(now) {
+  if (userInfoFetchCooldownUntil.size <= USERINFO_FETCH_COOLDOWN_MAX) return
+  for (const [k, until] of userInfoFetchCooldownUntil) {
+    if (until <= now) userInfoFetchCooldownUntil.delete(k)
+    if (userInfoFetchCooldownUntil.size <= USERINFO_FETCH_COOLDOWN_MAX) break
+  }
+}
+
+// ------------------------------
+// Bridge注入 & メッセージ通信
+// ------------------------------
+
+/**
+ * `page_bridge.js` をページコンテキストに注入し、X内部のキャッシュへアクセスできるようにします。
+ */
 function injectPageBridge() {
   const id = 'antiimp-page-bridge'
   if (document.getElementById(id)) return
@@ -51,7 +79,7 @@ window.addEventListener('message', (event) => {
 })
 
 /**
- * Ask page context for userInfo about screenNames.
+ * ページコンテキストへ userInfo（following / followersCount など）を問い合わせます。
  * @param {string[]} screenNames
  */
 function requestUserInfoFromPage(screenNames) {
@@ -68,10 +96,10 @@ function requestUserInfoFromPage(screenNames) {
       }
     }
 
-    // Re-apply after userInfo arrives (fixes follower-count exception timing)
+    // userInfoが届いたら再スキャン（フォロワー数例外の判定タイミングを揃える）
     scheduleScan()
 
-    // Quotes page tends to fill users/entities lazily; retry a few times if we got nothing.
+    // Quotesは users/entities が遅延で埋まることがあるため、0件なら数回リトライ。
     if (count === 0 && screenNames.length) {
       scheduleRetry()
     }
@@ -83,39 +111,56 @@ function requestUserInfoFromPage(screenNames) {
     screenNames,
   }, '*')
 
-  // fail-safe cleanup
+  // 応答が来ない場合に備えて、一定時間後に破棄
   setTimeout(() => pendingBridgeRequests.delete(requestId), 2000)
 }
+
+// ------------------------------
+// DOMヘルパー
+// ------------------------------
 
 const HIDDEN_ATTR = 'data-antiimp-hidden'
 const HIDDEN_REASON_ATTR = 'data-antiimp-hidden-reason'
 
+/**
+ * 会話ページ（/status/）または引用一覧（/quotes）かどうか。
+ */
 function isConversationOrQuotesPage() {
-  // Apply in permalink conversation pages and quote timelines.
-  // Examples:
+  // permalink会話ページ・引用一覧でのみ適用
+  // 例:
   // - /{user}/status/{id}
   // - /{user}/status/{id}/quotes
-  return location.pathname.includes('/status/')
+  const path = location.pathname
+  if (!path.includes('/status/')) return false
+  // /photo/ などのメディア表示ページではDOM構造が異なるため適用しない
+  if (path.includes('/photo/')) return false
+  return true
 }
 
-/** @param {HTMLElement} el */
+/**
+ * tweet要素から、タイムラインのセルコンテナ（cellInnerDiv）を取得します。
+ * @param {HTMLElement} el
+ */
 function getTweetCellContainer(el) {
   return el.closest('div[data-testid="cellInnerDiv"]') || el
 }
 
-/** @param {HTMLElement} tweet */
+/**
+ * 外側ツイートの「投稿者」が認証(Verified)かどうか。
+ * （引用元ツイートの埋め込みにある認証バッジは無視します）
+ * @param {HTMLElement} tweet
+ */
 function isVerifiedTweet(tweet) {
   // IMPORTANT:
-  // On quote timelines, an article often contains an embedded quoted tweet.
-  // That embedded tweet can include a verified icon even if the quoting user is not verified.
-  // Therefore we only consider the verified icon inside the *author header*.
+  // Quotes一覧では、引用元ツイートが埋め込み表示されます。
+  // 埋め込み側に認証バッジがあると誤判定するため、投稿者ヘッダ内のバッジだけを見る。
 
   const header = getAuthorHeader(tweet) || tweet
 
-  // X often uses data-testid icon-verified for the check badge.
+  // Xは data-testid="icon-verified" を使うことが多い
   if (header.querySelector('[data-testid="icon-verified"]')) return true
 
-  // Fallback for aria-label based icons (depends on locale).
+  // aria-labelに依存するフォールバック（言語設定に依存）
   const svg = header.querySelector('svg[aria-label]')
   if (!svg) return false
   const label = (svg.getAttribute('aria-label') || '').toLowerCase()
@@ -123,8 +168,8 @@ function isVerifiedTweet(tweet) {
 }
 
 /**
- * On Quotes pages, an outer tweet can contain an embedded quoted tweet (sometimes as a nested <article>).
- * We need the *outer* tweet author's header.
+ * 外側ツイートの投稿者ヘッダ（User-Nameブロック）を取得します。
+ * Quotesではツイートがネストするため、埋め込み側のヘッダを拾わないようにします。
  * @param {HTMLElement} tweet
  */
 function getAuthorHeader(tweet) {
@@ -137,21 +182,21 @@ function getAuthorHeader(tweet) {
 }
 
 /**
- * Extract @screenName from a tweet.
+ * tweet要素から @screenName を抽出します（ベストエフォート）。
  * @param {HTMLElement} tweet
  * @returns {string|null}
  */
 function getScreenNameFromTweet(tweet) {
-  // Usually the user name block exists in header.
+  // 基本的にユーザー名ブロックはヘッダにある
   const userNameBlock = getAuthorHeader(tweet)
   const scope = userNameBlock || tweet
 
-  // 1) Prefer @handle text if present (more robust than href patterns).
+  // 1) @handle のテキストが取れればそれを優先（hrefより頑健）
   const text = (scope.textContent || '').trim()
   const at = text.match(/@([A-Za-z0-9_]{1,15})/)
   if (at) return at[1].toLowerCase()
 
-  // 2) Fallback to profile link like /{screenName}
+  // 2) フォールバック：プロフィールリンク（/{screenName}）から推測
   const a = scope.querySelector('a[href^="/"]')
   if (!a) return null
 
@@ -160,37 +205,15 @@ function getScreenNameFromTweet(tweet) {
   if (!m) return null
 
   const screenName = m[1].toLowerCase()
-  // Guard against special routes.
+  // 特殊ルート除外
   if (!screenName || screenName === 'home' || screenName === 'i' || screenName === 'settings') return null
   return screenName
 }
 
 /**
- * @param {string} raw
- * @returns {number|null}
- */
-function parseFollowerCount(raw) {
-  // Examples:
-  // - "1,234"
-  // - "12.3K" / "1.2M"
-  // - "1.2万" / "3.4億"
-  const s = raw.replace(/\s/g, '').replace(/,/g, '')
-  const m = s.match(/(\d+(?:\.\d+)?)([KkMm万億])?$/)
-  if (!m) return null
-  let n = Number(m[1])
-  if (Number.isNaN(n)) return null
-  const unit = m[2]
-  if (!unit) return Math.floor(n)
-  if (unit === 'K' || unit === 'k') n *= 1_000
-  else if (unit === 'M' || unit === 'm') n *= 1_000_000
-  else if (unit === '万') n *= 10_000
-  else if (unit === '億') n *= 100_000_000
-  return Math.floor(n)
-}
-
-/**
+ * 例外設定（フォロー中 / フォロワー数閾値）により「表示するべきか」を判定します。
  * @param {string|null} screenName
- * @returns {boolean} true if allowed (should remain visible)
+ * @returns {boolean} true=表示する
  */
 function isAllowedByExceptions(screenName) {
   if (!screenName) return false
@@ -206,9 +229,10 @@ function isAllowedByExceptions(screenName) {
 }
 
 /**
- * If follower-count exception is enabled but followersCount is not available yet,
- * we keep the tweet visible (do not hide prematurely).
+ * フォロワー数閾値の例外がONなのに followersCount が未取得の場合は、
+ * 誤って非表示にしないため一旦表示を維持します。
  * @param {string|null} screenName
+ * @returns {boolean}
  */
 function shouldDeferHideBecauseFollowersCountUnknown(screenName) {
   if (!config.showIfFollowerCountAtLeastEnabled) return false
@@ -217,7 +241,11 @@ function shouldDeferHideBecauseFollowersCountUnknown(screenName) {
   return !info || info.followersCount == null
 }
 
-/** @param {HTMLElement} tweet */
+/**
+ * ツイートのタイムラインセルを非表示にします。
+ * @param {HTMLElement} tweet
+ * @param {string} reason
+ */
 function hideTweet(tweet, reason) {
   const container = getTweetCellContainer(tweet)
   if (container.getAttribute(HIDDEN_ATTR) === 'true') return
@@ -226,7 +254,10 @@ function hideTweet(tweet, reason) {
   container.setAttribute(HIDDEN_REASON_ATTR, reason)
 }
 
-/** @param {HTMLElement} tweet */
+/**
+ * 非表示を解除して、ツイートのタイムラインセルを表示します。
+ * @param {HTMLElement} tweet
+ */
 function showTweet(tweet) {
   const container = getTweetCellContainer(tweet)
   if (container.getAttribute(HIDDEN_ATTR) !== 'true') return
@@ -235,6 +266,9 @@ function showTweet(tweet) {
   container.removeAttribute(HIDDEN_REASON_ATTR)
 }
 
+/**
+ * これまで非表示にしたセルをすべて表示に戻します。
+ */
 function showAllHidden() {
   const hidden = document.querySelectorAll(`div[${HIDDEN_ATTR}="true"]`)
   for (const el of hidden) {
@@ -246,6 +280,13 @@ function showAllHidden() {
   }
 }
 
+// ------------------------------
+// メイン処理（走査＆適用）
+// ------------------------------
+
+/**
+ * 画面上のツイートを走査し、設定に従って表示/非表示を適用します。
+ */
 function scanAndApply() {
   if (!config.enabled || !config.hideBlueBadgeReplies || !isConversationOrQuotesPage()) {
     retryCount = 0
@@ -258,35 +299,40 @@ function scanAndApply() {
   }
 
   // IMPORTANT:
-  // On Quotes pages, each timeline cell can contain:
-  // - the outer quote tweet (author we care about)
-  // - an embedded quoted tweet (often also rendered as an <article data-testid="tweet">)
-  // Order is not guaranteed. We must pick the *outer* article.
+  // Quotes一覧では、1セル内に
+  // - 外側の引用ツイート（こちらが判定対象）
+  // - 引用元の埋め込みツイート（こちらは判定対象外）
+  // が存在し得ます。順序が保証されないため、外側だけを選びます。
   const cells = Array.from(document.querySelectorAll('div[data-testid="cellInnerDiv"]'))
   const tweets = cells
     .map((cell) => {
       const articles = Array.from(cell.querySelectorAll('article[data-testid="tweet"]'))
       if (!articles.length) return null
 
-      // Choose an article that is NOT nested within another tweet article.
-      // (Embedded quoted tweets are typically nested.)
+      // 他のtweet articleの内側にネストしていないもの（外側tweet）を優先。
+      // （引用元の埋め込みtweetはネストしていることが多い）
       const outer = articles.find((a) => a.parentElement && !a.parentElement.closest('article[data-testid="tweet"]'))
       return outer || articles[0]
     })
     .filter(Boolean)
   if (tweets.length === 0) return
 
-  // Ask page cache for user info for visible tweets (best effort)
+  // 元ツイの投稿者（ツイート主）を特定。
+  // ツイート主のリプライは、青バッジ付きでも表示する。
+  const rootAuthor = getRootAuthorScreenName(tweets)
+
+  // 必要なユーザー情報（フォロー中/フォロワー数）をページ側キャッシュから取得（ベストエフォート）
   /** @type {Set<string>} */
+  const now = Date.now()
   const screenNamesToFetch = new Set()
   for (let i = 1; i < tweets.length; i++) {
     const sn = getScreenNameFromTweet(/** @type {HTMLElement} */(tweets[i]))
     if (!sn) continue
 
     const cached = userInfoCache[sn]
-    // Fetch if we have no cache OR followersCount is still missing (common early)
+    // キャッシュが無い、または followersCount が未取得の場合は取得対象にする
     if (!cached || cached.followersCount == null) {
-      const now = Date.now()
+      pruneCooldownMap(now)
       const until = userInfoFetchCooldownUntil.get(sn) || 0
       if (now >= until) {
         userInfoFetchCooldownUntil.set(sn, now + USERINFO_FETCH_COOLDOWN_MS)
@@ -296,13 +342,18 @@ function scanAndApply() {
   }
   if (screenNamesToFetch.size) requestUserInfoFromPage(Array.from(screenNamesToFetch).slice(0, 200))
 
-  // logs removed
-
-  // Heuristic: first cell is the main tweet; treat the rest as replies/quotes.
+  // 先頭セルは元ツイとして常に表示し、2件目以降をリプライ/引用として判定します。
   for (let i = 0; i < tweets.length; i++) {
     const tweet = /** @type {HTMLElement} */(tweets[i])
     if (i === 0) {
-      // never hide the root tweet
+      // 元ツイは常に表示
+      showTweet(tweet)
+      continue
+    }
+
+    // ツイート主のリプライは表示（青バッジでも隠さない）
+    const screenName = getScreenNameFromTweet(tweet)
+    if (rootAuthor && screenName && screenName === rootAuthor) {
       showTweet(tweet)
       continue
     }
@@ -312,13 +363,12 @@ function scanAndApply() {
       continue
     }
 
-    const screenName = getScreenNameFromTweet(tweet)
     const allowed = isAllowedByExceptions(screenName)
     if (allowed) {
       showTweet(tweet)
     } else {
-      // If follower count exception is enabled but we don't have follower count yet,
-      // keep it visible for now and decide after state arrives.
+      // フォロワー数閾値例外がONでも、followersCountが未取得なら一旦表示を維持し、
+      // 取得後に再判定します。
       if (shouldDeferHideBecauseFollowersCountUnknown(screenName)) {
         showTweet(tweet)
       } else {
@@ -327,11 +377,42 @@ function scanAndApply() {
     }
   }
 
-  // logs removed
+  // ログ出力は削除
 }
 
-// Quotes pages often populate users.entities lazily. Retry a few times so follower counts can arrive.
+/**
+ * 元ツイ投稿者（ツイート主）の screenName を取得します。
+ * @param {Element[]} tweets
+ * @returns {string|null}
+ */
+function getRootAuthorScreenName(tweets) {
+  try {
+    const first = tweets && tweets[0]
+    if (first) {
+      const fromTweet = getScreenNameFromTweet(/** @type {HTMLElement} */(first))
+      if (fromTweet) return fromTweet
+    }
+  } catch {
+    // 無視
+  }
+
+  // フォールバック：URLから推測（/{screenName}/status/{id}）
+  try {
+    const m = location.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\//)
+    if (m) return m[1].toLowerCase()
+  } catch {
+    // 無視
+  }
+
+  return null
+}
+
+// Quotesは users.entities が遅延で埋まることがあるため、数回リトライして追従します。
 let retryCount = 0
+/**
+ * Quotesページ向け：users/entities が遅延で埋まる場合があるため、
+ * バックオフしながら数回再スキャンします。
+ */
 function scheduleRetry() {
   if (!config.showIfFollowerCountAtLeastEnabled) return
   if (!isConversationOrQuotesPage()) return
@@ -339,21 +420,36 @@ function scheduleRetry() {
   retryCount++
   const delay = Math.min(6000, 600 * Math.pow(1.4, retryCount))
   setTimeout(() => {
-    scanAndApply()
+    scheduleScan()
   }, delay)
 }
 
+const MIN_SCAN_INTERVAL_MS = 200
+let lastScanAt = 0
+let scanTimer = 0
 let scheduled = false
+/**
+ * スキャンをスケジュールします。
+ * MutationObserverの連続発火で重くならないよう、最小間隔を設けています。
+ */
 function scheduleScan() {
   if (scheduled) return
   scheduled = true
-  requestAnimationFrame(() => {
+  window.clearTimeout(scanTimer)
+
+  const now = Date.now()
+  const wait = Math.max(0, MIN_SCAN_INTERVAL_MS - (now - lastScanAt))
+  scanTimer = window.setTimeout(() => {
+    lastScanAt = Date.now()
     scheduled = false
     scanAndApply()
-  })
+  }, wait)
 }
 
 async function init() {
+  // ------------------------------
+  // 起動処理
+  // ------------------------------
   injectPageBridge()
 
   config = await chrome.storage.local.get(DEFAULT_CONFIG)
@@ -367,15 +463,13 @@ async function init() {
     scheduleScan()
   })
 
-  // Observe timeline updates
+  // タイムライン更新を監視
   new MutationObserver(() => scheduleScan()).observe(document.documentElement, {
     childList: true,
     subtree: true
   })
 
-  // NOTE: Hovercard-based parsing is disabled to keep followerCount source consistent.
-
-  // When navigating within SPA, re-evaluate.
+  // SPA内遷移でも再判定
   const origPushState = history.pushState
   history.pushState = function() {
     // @ts-ignore

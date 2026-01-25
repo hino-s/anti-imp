@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "anti-imp",
   "description": "Hide verified (blue badge) replies on X (Twitter).",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "default_locale": "en",
   "action": {
     "default_title": "anti-imp",
